@@ -7,6 +7,7 @@ from PIL import Image
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import numpy as np
 
 st.set_page_config(page_title="GCASH Survey Scanner", layout="wide")
 st.title("📝 GCASH Survey Form Scanner")
@@ -126,8 +127,8 @@ def extract_survey_gemini(image):
     return json.loads(json_text), response.text
 
 # Initialize session state
-if 'all_data' not in st.session_state:
-    st.session_state.all_data = []
+if 'df' not in st.session_state:
+    st.session_state.df = None
 if 'raw_output' not in st.session_state:
     st.session_state.raw_output = ""
 
@@ -144,8 +145,16 @@ if uploaded_file:
                 st.session_state.raw_output = raw_text
                 
                 if table_data:
-                    # BINALIK SA VERTICAL - 1 column per field
-                    st.session_state.all_data.append(table_data)
+                    # FIX: Wrap sa list para maging 1 row dataframe
+                    df = pd.DataFrame([table_data])
+                    
+                    # Ensure all columns exist
+                    for header in HEADERS:
+                        if header not in df.columns:
+                            df[header] = ""
+                    
+                    df = df[HEADERS]
+                    st.session_state.df = df
                     st.success("✅ Extracted encircled answers!")
                 else:
                     st.warning("Walang na-detect na data.")
@@ -160,34 +169,24 @@ if st.session_state.raw_output:
     with st.expander("🔍 RAW OUTPUT FROM GEMINI - Click to see"):
         st.code(st.session_state.raw_output, language="text")
 
-# Show editor - VERTICAL ulit
-if st.session_state.all_data:
-    st.subheader(f"📋 All Scanned Data - {len(st.session_state.all_data)} forms")
+# Show editor
+if st.session_state.df is not None:
+    st.subheader("📋 Verify Data - Edit mo kung may mali")
     st.caption("Encircles + Name + Mobile + Negosyo lang ang kukunin")
     
-    # Convert to DataFrame - VERTICAL
-    df = pd.DataFrame(st.session_state.all_data)
-    
-    # Ensure all columns exist
-    for header in HEADERS:
-        if header not in df.columns:
-            df[header] = ""
-    
-    df = df[HEADERS]
-    
     edited_df = st.data_editor(
-        df,
+        st.session_state.df,
         num_rows="dynamic",
         use_container_width=True,
         key="editor",
-        height=600
+        height=500
     )
-    st.session_state.all_data = edited_df.to_dict('records')
+    st.session_state.df = edited_df
     
     col1, col2 = st.columns(2)
     
     with col1:
-        csv = df.to_csv(index=False).encode('utf-8')
+        csv = st.session_state.df.to_csv(index=False).encode('utf-8')
         st.download_button(
             "📥 Download CSV",
             csv,
@@ -206,7 +205,13 @@ if st.session_state.all_data:
                     if len(sheet.get_all_values()) == 0:
                         sheet.append_row(HEADERS)
                     
-                    rows = st.session_state.df.values.tolist()
+                    # FIX: Replace NaN, inf, -inf with empty string bago i-sync
+                    df_to_sync = st.session_state.df.copy()
+                    df_to_sync = df_to_sync.replace([np.inf, -np.inf], "")
+                    df_to_sync = df_to_sync.fillna("")
+                    df_to_sync = df_to_sync.astype(str)
+                    
+                    rows = df_to_sync.values.tolist()
                     sheet.append_rows(rows, value_input_option='USER_ENTERED')
                     st.success(f"✅ {len(rows)} rows synced!")
                     st.balloons()

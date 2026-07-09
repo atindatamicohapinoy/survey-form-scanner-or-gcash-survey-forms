@@ -66,22 +66,51 @@ def safe_generate_content(model_name, img, prompt):
 
 def extract_survey_gemini(image):
     prompt = """
-    Extract ONLY the CIRCLED/SELECTED answers from this GCASH survey form. Return valid JSON array with 1 object.
+    You are scanning a GCASH financial literacy survey form. Look at the image carefully.
+
+    CRITICAL: Find answers that are CIRCLED, MARKED, or SELECTED with pen/marker. Ignore unmarked options.
+
+    Extract and return ONLY this JSON structure:
     
+    {
+      "PANGALAN": "text from Pangalan field",
+      "MOBILE_NUMBER": "text from CONTACT NUMBER field",
+      "A1_A": "A or B or C - whichever letter is CIRCLED",
+      "A1_B": "A or B or C - whichever letter is CIRCLED",
+      "A1_C": "A or B or C - whichever letter is CIRCLED",
+      "B1_A": "A or B or C - whichever letter is CIRCLED",
+      "B1_B": "A or B or C - whichever letter is CIRCLED",
+      "B1_C": "A or B or C - whichever letter is CIRCLED",
+      "C1_A": "A or B or C - whichever letter is CIRCLED",
+      "C1_B": "A or B or C - whichever letter is CIRCLED",
+      "C1_C": "A or B or C - whichever letter is CIRCLED",
+      "D1_A": "A or B or C - whichever letter is CIRCLED",
+      "D1_B": "A or B or C - whichever letter is CIRCLED",
+      "D1_C": "A or B or C - whichever letter is CIRCLED",
+      "A2_A": "A or B or C - whichever letter is CIRCLED",
+      "A2_B": "A or B or C - whichever letter is CIRCLED",
+      "B2_A": "A or B or C - whichever letter is CIRCLED",
+      "B2_B": "A or B or C - whichever letter is CIRCLED",
+      "B2_C": "A or B or C - whichever letter is CIRCLED",
+      "C2_A": "A or B or C - whichever letter is CIRCLED",
+      "C2_B": "A or B or C - whichever letter is CIRCLED",
+      "C2_C": "A or B or C - whichever letter is CIRCLED",
+      "D2_A": "A or B or C - whichever letter is CIRCLED",
+      "D2_B": "A or B or C - whichever letter is CIRCLED",
+      "D2_C": "A or B or C - whichever letter is CIRCLED",
+      "E1": "handwritten text if any, else empty string",
+      "E2": "handwritten text if any, else empty string",
+      "E3": "handwritten text if any, else empty string"
+    }
+
     RULES:
-    1. Extract "PANGALAN" from top left
-    2. Extract "MOBILE_NUMBER" from "CONTACT NUMBER" top right
-    3. For ALL multiple choice: return ONLY the letter A, B, or C of the CIRCLED answer. If multiple circled, join with comma. If none, return "".
-    4. For Section E handwritten: extract the text. Use keys E1, E2, E3.
-    
-    Use these exact keys in JSON:
-    PANGALAN, MOBILE_NUMBER,
-    A1_A, A1_B, A1_C, B1_A, B1_B, B1_C, C1_A, C1_B, C1_C, D1_A, D1_B, D1_C,
-    A2_A, A2_B, B2_A, B2_B, B2_C, C2_A, C2_B, C2_C, D2_A, D2_B, D2_C, E1, E2, E3
+    1. ONLY return letters A, B, or C for multiple choice. Look for CIRCLES or marks.
+    2. If no circle found for a question, return empty string ""
+    3. If multiple answers circled in one question, return "A,B" or "A,C" etc
+    4. For E1, E2, E3: extract handwritten answer text
+    5. Return ONLY valid JSON array with 1 object, no markdown, no explanation
     
     Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "MOBILE_NUMBER": "09618869183", "A1_A": "C", "A1_B": "C", "D1_A": "A"}]
-    
-    Only return JSON, no other text.
     """
     try:
         response = safe_generate_content("gemini-2.5-flash", image, prompt)
@@ -91,6 +120,8 @@ def extract_survey_gemini(image):
     json_text = response.text.strip()
     if json_text.startswith("```json"):
         json_text = json_text.replace("```json", "").replace("```", "").strip()
+    if json_text.startswith("```"):
+        json_text = json_text.replace("```", "").strip()
     
     return json.loads(json_text)
 
@@ -103,7 +134,7 @@ uploaded_files = st.file_uploader(
     "Upload Survey Form Photos", 
     type=['png', 'jpg', 'jpeg'], 
     accept_multiple_files=True,
-    help="Piliin lahat ng pics na i-scan mo. Pwede mag-add ulit mamaya."
+    help="Piliin lahat ng pics na i-scan mo"
 )
 
 if uploaded_files:
@@ -134,6 +165,7 @@ if uploaded_files:
                         
                 except Exception as e:
                     st.error(f"❌ {uploaded_file.name} - Error: {str(e)}")
+                    st.code(str(e))
                 
                 progress_bar.progress((idx + 1) / len(uploaded_files))
             
@@ -151,12 +183,11 @@ if st.session_state.all_data:
     
     df = pd.DataFrame(st.session_state.all_data)
     
-    # Ensure all columns exist kahit empty
+    # Ensure all columns exist
     for header in HEADERS:
         if header not in df.columns:
             df[header] = ""
     
-    # Reorder columns para tugma sa Sheet
     df = df[HEADERS]
     
     edited_df = st.data_editor(
@@ -188,12 +219,10 @@ if st.session_state.all_data:
                     client = get_gsheet_client()
                     sheet = client.open_by_key(SHEET_ID).sheet1
                     
-                    # Check kung may headers na
                     existing = sheet.get_all_values()
                     if len(existing) == 0:
                         sheet.append_row(HEADERS)
                     
-                    # Sync rows
                     df_to_sync = pd.DataFrame(st.session_state.all_data)[HEADERS]
                     rows = df_to_sync.values.tolist()
                     sheet.append_rows(rows, value_input_option='USER_ENTERED')

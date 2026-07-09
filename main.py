@@ -68,57 +68,25 @@ def safe_generate_content(model_name, img, prompt):
 
 def extract_survey_gemini(image):
     prompt = """
-    You are an expert OCR for GCASH survey forms. Extract ONLY the CIRCLED answers.
+    Tignan mo tong GCASH survey form. Ilagay ang sagot sa kada question.
     
-    FORM LAYOUT:
-    LEFT PAGE "BAGO MAGSIMULA" has questions A1 to D1.
-    RIGHT PAGE "SAGUTAN NATIN" has CONTACT NUMBER, NEGOSYO, then questions A2 to E3.
+    RULES:
+    1. Kunin ang PANGALAN sa taas kaliwa
+    2. Kunin ang MOBILE_NUMBER sa CONTACT NUMBER sa taas kanan
+    3. Kunin ang NEGOSYO sa ilalim ng CONTACT NUMBER. Pag blank, "" lang
+    4. Sa bawat multiple choice A, B, C - tignan kung anong letter ang may BILOG. Yun ang sagot.
+    5. Sa Section E - kunin yung sinulat na sagot
     
-    EXTRACTION RULES:
-    1. Find PANGALAN at top left of page 1
-    2. Find MOBILE_NUMBER at top right of page 2 under "CONTACT NUMBER"
-    3. Find NEGOSYO below MOBILE_NUMBER. If blank return ""
-    4. For each multiple choice question below, find which letter A, B, or C has a CIRCLE, CHECK, or SHADE around it. Return ONLY that letter.
+    Gamitin tong keys sa JSON:
+    PANGALAN, MOBILE_NUMBER, NEGOSYO,
+    A1_A, A1_B, A1_C, B1_A, B1_B, B1_C, C1_A, C1_B, C1_C, D1_A, D1_B, D1_C,
+    A2_A, A2_B, B2_A, B2_B, B2_C, C2_A, C2_B, C2_C, D2_A, D2_B, D2_C, E1, E2, E3
     
-    PAGE 1 QUESTIONS - Map to these keys:
-    "Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?" = A1_A
-    "Paano mo hinahati ang pera mo kapag may kita ka?" = A1_B
-    "Anong ginagawa mo kapag may sobra sa kita mo?" = A1_C
-    "Ano ang ginagawa mo sa pera mo?" = B1_A
-    "Saan mo nilalagay ang ipon mo?" = B1_B
-    "Ano ang gusto mong pag-ipunan?" = B1_C
-    "Ano ang naiisip mo kapag sinabing utang?" = C1_A
-    "Bakit ka umuutang?" = C1_B
-    "Anong ginagawa mo para mabayaran ang utang?" = C1_C
-    "Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?" = D1_A
-    "Paano mo pinu-protektahan ang password mo?" = D1_B
-    "Ano ang pwede mong gawin para makaiwas sa scam?" = D1_C
+    Para sa multiple choice, ibalik mo lang A o B o C. Pag walang bilog, "" lang.
     
-    PAGE 2 QUESTIONS - Map to these keys:
-    "Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?" = A2_A
-    "Kailan mo sisimulan ang pag-badyet?" = A2_B
-    "Ano ang plano mong gawin sa pera mo ngayon?" = B2_A
-    "Saan mo gustong ilagay ang ipon mo?" = B2_B
-    "Ano ang pinag-iipunan mo ngayon?" = B2_C
-    "Ano ang masasabi mo ngayon tungkol sa utang?" = C2_A
-    "Paano mo babayaran ang utang mo?" = C2_B
-    "Ano ang gagawin mo para umiwas sa mabigat na utang?" = C2_C
-    "Ano ang gagawin mo kapag may text tungkol sa investment na kikita ka ng 50% kada buwan?" = D2_A
-    "Paano ka mag-iingat sa online shopping?" = D2_B
-    "Ano ang gagawin mo kung nabiktima ka ng scam?" = D2_C
+    Example: [{"PANGALAN": "LINDA MANZANO DE OCAMPO", "MOBILE_NUMBER": "09468566242", "NEGOSYO": "", "A1_A": "A", "A1_B": "B", "A1_C": "B"}]
     
-    SECTION E - Extract handwritten text:
-    E1, E2, E3
-    
-    CRITICAL:
-    - If NO circle on a question, return "" for that key
-    - If multiple circles on one question, return "A,B" 
-    - Look carefully at EVERY question
-    
-    Return ONLY valid JSON array with 1 object. Example:
-    [{"PANGALAN": "LINDA MANZANO DE OCAMPO", "MOBILE_NUMBER": "09468566242", "NEGOSYO": "", "A1_A": "A", "A1_B": "B", "A1_C": "B", "D1_C": "C", "A2_A": "A"}]
-    
-    No markdown, no explanation, just JSON.
+    Return JSON array lang. Wag na mag-explain.
     """
     try:
         response = safe_generate_content("gemini-2.5-flash", image, prompt)
@@ -142,7 +110,7 @@ uploaded_files = st.file_uploader(
     "Upload Survey Form Photos", 
     type=['png', 'jpg', 'jpeg'], 
     accept_multiple_files=True,
-    help="Dapat malinaw yung mga BILOG sa A, B, C options"
+    help="Dapat malinaw yung mga BILOG sa A, B, C"
 )
 
 if uploaded_files:

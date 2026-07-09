@@ -10,7 +10,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="GCASH Survey Scanner", layout="wide")
 st.title("📝 GCASH Survey Form Scanner")
-st.caption("Upload forms → Scan encircles → Auto-sync sa Google Sheets")
+st.caption("Upload multiple forms. Encircles + Name + Mobile + Negosyo lang ang kukunin.")
 
 # Setup Gemini API
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
@@ -19,12 +19,10 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Google Sheets setup
 SHEET_ID = "1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84"
 
-# Headers na naka-align sa sequence ng form mo - AUTO CREATE SA SHEET
+# Headers - INAYOS NA ORDER: D questions → MOBILE_NUMBER → NEGOSYO → A2 questions
 HEADERS = [
-    'TIMESTAMP',
-    'FILENAME', 
-    'PANGALAN', 
-    'MOBILE_NUMBER',
+    'TIMESTAMP', 'FILENAME', 'PANGALAN',
+    # Page 1 - BAGO MAGSIMULA (Left side)
     'A1_A. Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?',
     'A1_B. Paano mo hinahati ang pera mo kapag may kita ka?',
     'A1_C. Anong ginagawa mo kapag may sobra sa kita mo?',
@@ -37,6 +35,9 @@ HEADERS = [
     'D1_A. Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?',
     'D1_B. Paano mo pinu-protektahan ang password mo?',
     'D1_C. Ano ang pwede mong gawin para makaiwas sa scam?',
+    # MOBILE_NUMBER at NEGOSYO after D1 questions
+    'MOBILE_NUMBER', 'NEGOSYO',
+    # Page 2 - SAGUTAN NATIN (Right side)
     'A2_A. Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?',
     'A2_B. Kailan mo sisimulan ang pag-badyet?',
     'B2_A. Ano ang plano mong gawin sa pera mo ngayon?',
@@ -54,7 +55,6 @@ HEADERS = [
 ]
 
 def get_gsheet_client():
-    """Connect to Google Sheets using service account"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -75,15 +75,16 @@ def extract_survey_gemini(image):
     RULES:
     1. Extract "PANGALAN" from top left
     2. Extract "MOBILE_NUMBER" from "CONTACT NUMBER" top right
-    3. For ALL multiple choice: return ONLY the letter A, B, or C of the CIRCLED answer. If multiple circled, join with comma. If none, return "".
-    4. For Section E handwritten: extract the text. Use keys E1, E2, E3.
+    3. Extract "NEGOSYO" from "NEGOSYO" field below CONTACT NUMBER
+    4. For ALL multiple choice: return ONLY the letter A, B, or C of the CIRCLED answer. If multiple circled, join with comma. If none, return "".
+    5. For Section E handwritten: extract the text. Use keys E1, E2, E3.
     
     Use these exact keys in JSON:
-    PANGALAN, MOBILE_NUMBER,
+    PANGALAN, MOBILE_NUMBER, NEGOSYO,
     A1_A, A1_B, A1_C, B1_A, B1_B, B1_C, C1_A, C1_B, C1_C, D1_A, D1_B, D1_C,
     A2_A, A2_B, B2_A, B2_B, B2_C, C2_A, C2_B, C2_C, D2_A, D2_B, D2_C, E1, E2, E3
     
-    Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "MOBILE_NUMBER": "09618869183", "A1_A": "C", "D1_A": "A"}]
+    Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "MOBILE_NUMBER": "09618869183", "NEGOSYO": "NONE", "A1_A": "C", "D1_A": "A", "A2_A": "C"}]
     
     Only return JSON, no other text.
     """
@@ -99,64 +100,86 @@ def extract_survey_gemini(image):
     return json.loads(json_text)
 
 # Initialize session state
-if 'df' not in st.session_state:
-    st.session_state.df = None
+if 'all_data' not in st.session_state:
+    st.session_state.all_data = []
 
-uploaded_file = st.file_uploader("Upload Survey Form Photo", type=['png', 'jpg', 'jpeg'])
+# Multiple file uploader
+uploaded_files = st.file_uploader(
+    "Upload Survey Form Photos", 
+    type=['png', 'jpg', 'jpeg'], 
+    accept_multiple_files=True,
+    help="Piliin lahat ng pics na i-scan mo. Pwede mag-add ulit mamaya."
+)
 
-if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Ready to scan", use_column_width=True)
+if uploaded_files:
+    st.info(f"📁 {len(uploaded_files)} file(s) selected")
     
-    if st.button("🔍 Run AI Scan", type="primary"):
-        with st.spinner('Gemini AI is reading encircled answers... ~3-5 seconds'):
-            try:
-                table_data = extract_survey_gemini(image)
+    col1, col2 = st.columns([1,3])
+    with col1:
+        if st.button("🔍 Run AI Scan All", type="primary", use_container_width=True):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for idx, uploaded_file in enumerate(uploaded_files):
+                status_text.text(f'Scanning {idx+1}/{len(uploaded_files)}: {uploaded_file.name}')
                 
-                if table_data:
-                    # Add metadata
-                    for row in table_data:
-                        row['TIMESTAMP'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        row['FILENAME'] = uploaded_file.name
+                try:
+                    image = Image.open(uploaded_file)
+                    table_data = extract_survey_gemini(image)
                     
-                    df = pd.DataFrame(table_data)
-                    
-                    # Ensure all columns exist at naka-align sa HEADERS
-                    for header in HEADERS:
-                        if header not in df.columns:
-                            df[header] = ""
-                    
-                    # Reorder para tugma sa Sheet
-                    df = df[HEADERS]
-                    
-                    st.session_state.df = df
-                    st.success(f"✅ Extracted encircled answers!")
-                else:
-                    st.warning("Walang na-detect na encircled answers. Try mo mas malinaw na picture.")
-                    
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+                    if table_data:
+                        for row in table_data:
+                            row['TIMESTAMP'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            row['FILENAME'] = uploaded_file.name
+                        
+                        st.session_state.all_data.extend(table_data)
+                        st.success(f"✅ {uploaded_file.name} - Scanned!")
+                    else:
+                        st.warning(f"⚠️ {uploaded_file.name} - Walang na-detect")
+                        
+                except Exception as e:
+                    st.error(f"❌ {uploaded_file.name} - Error: {str(e)}")
+                
+                progress_bar.progress((idx + 1) / len(uploaded_files))
+            
+            status_text.text("Done!")
+            st.rerun()
+    
+    with col2:
+        if st.button("🗑️ Clear All Data", use_container_width=True):
+            st.session_state.all_data = []
+            st.rerun()
 
-# Show editor + buttons kung may data na
-if st.session_state.df is not None:
-    st.subheader("📋 Verify Data - Edit mo kung may mali")
-    st.caption("Encircles + Name + Mobile lang ang kukunin")
+# Show combined table
+if st.session_state.all_data:
+    st.subheader(f"📋 All Scanned Data - {len(st.session_state.all_data)} forms")
+    
+    df = pd.DataFrame(st.session_state.all_data)
+    
+    # Ensure all columns exist kahit empty
+    for header in HEADERS:
+        if header not in df.columns:
+            df[header] = ""
+    
+    # Reorder columns para tugma sa Sheet
+    df = df[HEADERS]
     
     edited_df = st.data_editor(
-        st.session_state.df,
+        df,
         num_rows="dynamic",
         use_container_width=True,
         key="editor",
         height=400
     )
-    st.session_state.df = edited_df
+    
+    st.session_state.all_data = edited_df.to_dict('records')
     
     col1, col2 = st.columns(2)
     
     with col1:
-        csv = st.session_state.df.to_csv(index=False).encode('utf-8')
+        csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            "📥 Download CSV",
+            "📥 Download All CSV",
             csv,
             f"survey_data_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             "text/csv",
@@ -166,25 +189,30 @@ if st.session_state.df is not None:
     with col2:
         if st.button("🚀 Sync All to Google Sheets", use_container_width=True, type="primary"):
             try:
-                with st.spinner('Syncing to Google Sheets...'):
+                with st.spinner(f'Syncing {len(st.session_state.all_data)} rows...'):
                     client = get_gsheet_client()
                     sheet = client.open_by_key(SHEET_ID).sheet1
                     
-                    # Check kung empty yung sheet - auto add headers sa Row 1
+                    # Check kung may headers na
                     existing = sheet.get_all_values()
                     if len(existing) == 0:
-                        sheet.append_row(HEADERS)
-                        st.info("✅ Auto-created headers sa Row 1")
+                        sheet.append_row(HEADERS) # ← Auto-lagay headers
                     
-                    rows = st.session_state.df.values.tolist()
+                    # Sync rows
+                    df_to_sync = pd.DataFrame(st.session_state.all_data)[HEADERS]
+                    rows = df_to_sync.values.tolist()
                     sheet.append_rows(rows, value_input_option='USER_ENTERED')
+                    
                     st.success(f"✅ {len(rows)} rows synced sa Google Sheets!")
                     st.balloons()
+                    
+                    if st.checkbox("Clear data after successful sync"):
+                        st.session_state.all_data = []
+                        st.rerun()
                     
             except Exception as e:
                 st.error(f"Sync failed: {str(e)}")
                 st.code(f"Error details: {repr(e)}")
-                st.info("Check: 1. Naka-share ba sheet sa service account? 2. Tama ba secrets?")
 else:
-    st.info("👆 Upload a survey form photo to start")
-    st.warning("⚠️ Encircles + Name + Mobile lang ang kukunin")
+    st.info("👆 Upload multiple survey form photos to start")
+    st.warning("⚠️ Encircles + Name + Mobile + Negosyo lang ang kukunin")

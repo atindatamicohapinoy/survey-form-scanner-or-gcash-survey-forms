@@ -10,7 +10,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="GCASH Survey Scanner", layout="wide")
 st.title("📝 GCASH Survey Form Scanner")
-st.caption("Upload multiple forms. Encircles + Name + Mobile + Negosyo lang ang kukunin.")
+st.caption("Upload multiple forms. Encircles + Name + Mobile lang ang kukunin.")
 
 # Setup Gemini API
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
@@ -19,10 +19,9 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Google Sheets setup
 SHEET_ID = "1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84"
 
-# Headers - INAYOS NA ORDER: D questions → MOBILE_NUMBER → NEGOSYO → A2 questions
+# Headers na tugma sa Row 1 ng Sheet mo
 HEADERS = [
-    'TIMESTAMP', 'FILENAME', 'PANGALAN',
-    # Page 1 - BAGO MAGSIMULA (Left side)
+    'TIMESTAMP', 'FILENAME', 'PANGALAN', 'MOBILE_NUMBER',
     'A1_A. Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?',
     'A1_B. Paano mo hinahati ang pera mo kapag may kita ka?',
     'A1_C. Anong ginagawa mo kapag may sobra sa kita mo?',
@@ -35,9 +34,6 @@ HEADERS = [
     'D1_A. Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?',
     'D1_B. Paano mo pinu-protektahan ang password mo?',
     'D1_C. Ano ang pwede mong gawin para makaiwas sa scam?',
-    # MOBILE_NUMBER at NEGOSYO after D1 questions
-    'MOBILE_NUMBER', 'NEGOSYO',
-    # Page 2 - SAGUTAN NATIN (Right side)
     'A2_A. Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?',
     'A2_B. Kailan mo sisimulan ang pag-badyet?',
     'B2_A. Ano ang plano mong gawin sa pera mo ngayon?',
@@ -70,23 +66,24 @@ def safe_generate_content(model_name, img, prompt):
 
 def extract_survey_gemini(image):
     prompt = """
-    Extract ONLY the CIRCLED/SELECTED answers from this GCASH survey form. Return valid JSON array with 1 object.
+    You are analyzing a GCASH financial literacy survey form. Extract ONLY the CIRCLED or MARKED answers.
     
-    RULES:
-    1. Extract "PANGALAN" from top left
-    2. Extract "MOBILE_NUMBER" from "CONTACT NUMBER" top right
-    3. Extract "NEGOSYO" from "NEGOSYO" field below CONTACT NUMBER
-    4. For ALL multiple choice: return ONLY the letter A, B, or C of the CIRCLED answer. If multiple circled, join with comma. If none, return "".
-    5. For Section E handwritten: extract the text. Use keys E1, E2, E3.
+    CRITICAL RULES:
+    1. Look for CIRCLES, CHECK MARKS, or SHADED options. These are the selected answers.
+    2. Extract "PANGALAN" from handwritten text at top left
+    3. Extract "MOBILE_NUMBER" from "CONTACT NUMBER" field at top right
+    4. For each question, return ONLY the letter A, B, or C that is CIRCLED/SELECTED. If multiple circled, join with comma like "A,B". If none circled, return empty string "".
+    5. For Section E handwritten: extract the handwritten text. Use keys E1, E2, E3.
     
-    Use these exact keys in JSON:
-    PANGALAN, MOBILE_NUMBER, NEGOSYO,
+    Map the answers to these exact keys:
+    PANGALAN, MOBILE_NUMBER,
     A1_A, A1_B, A1_C, B1_A, B1_B, B1_C, C1_A, C1_B, C1_C, D1_A, D1_B, D1_C,
     A2_A, A2_B, B2_A, B2_B, B2_C, C2_A, C2_B, C2_C, D2_A, D2_B, D2_C, E1, E2, E3
     
-    Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "MOBILE_NUMBER": "09618869183", "NEGOSYO": "NONE", "A1_A": "C", "D1_A": "A", "A2_A": "C"}]
+    Example for the form in the image: 
+    [{"PANGALAN": "LINDA MANZANO DE OCAMPO", "MOBILE_NUMBER": "", "A1_A": "A", "A1_B": "B", "A1_C": "B"}]
     
-    Only return JSON, no other text.
+    Return ONLY valid JSON array with 1 object. No explanation, no markdown, just JSON.
     """
     try:
         response = safe_generate_content("gemini-2.5-flash", image, prompt)
@@ -96,6 +93,8 @@ def extract_survey_gemini(image):
     json_text = response.text.strip()
     if json_text.startswith("```json"):
         json_text = json_text.replace("```json", "").replace("```", "").strip()
+    elif json_text.startswith("```"):
+        json_text = json_text.replace("```", "").strip()
     
     return json.loads(json_text)
 
@@ -108,7 +107,7 @@ uploaded_files = st.file_uploader(
     "Upload Survey Form Photos", 
     type=['png', 'jpg', 'jpeg'], 
     accept_multiple_files=True,
-    help="Piliin lahat ng pics na i-scan mo. Pwede mag-add ulit mamaya."
+    help="Piliin lahat ng pics na i-scan mo. Dapat malinaw yung encircles."
 )
 
 if uploaded_files:
@@ -156,12 +155,11 @@ if st.session_state.all_data:
     
     df = pd.DataFrame(st.session_state.all_data)
     
-    # Ensure all columns exist kahit empty
+    # Ensure all columns exist
     for header in HEADERS:
         if header not in df.columns:
             df[header] = ""
     
-    # Reorder columns para tugma sa Sheet
     df = df[HEADERS]
     
     edited_df = st.data_editor(
@@ -193,12 +191,10 @@ if st.session_state.all_data:
                     client = get_gsheet_client()
                     sheet = client.open_by_key(SHEET_ID).sheet1
                     
-                    # Check kung may headers na
                     existing = sheet.get_all_values()
                     if len(existing) == 0:
-                        sheet.append_row(HEADERS) # ← Auto-lagay headers
+                        sheet.append_row(HEADERS)
                     
-                    # Sync rows
                     df_to_sync = pd.DataFrame(st.session_state.all_data)[HEADERS]
                     rows = df_to_sync.values.tolist()
                     sheet.append_rows(rows, value_input_option='USER_ENTERED')
@@ -215,4 +211,4 @@ if st.session_state.all_data:
                 st.code(f"Error details: {repr(e)}")
 else:
     st.info("👆 Upload multiple survey form photos to start")
-    st.warning("⚠️ Encircles + Name + Mobile + Negosyo lang ang kukunin")
+    st.warning("⚠️ Dapat malinaw yung CIRCLES sa A/B/C options para ma-detect")

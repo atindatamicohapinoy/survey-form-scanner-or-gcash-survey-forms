@@ -10,7 +10,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="GCASH Survey Scanner", layout="wide")
 st.title("📝 GCASH Survey Form Scanner")
-st.caption("Encircles + Name + Mobile + Negosyo lang. Blank pag walang bilog.")
+st.caption("Upload forms. Encircles + Name + Mobile + Negosyo lang ang kukunin.")
 
 # Setup Gemini API
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
@@ -68,52 +68,49 @@ def safe_generate_content(model_name, img, prompt):
 
 def extract_survey_gemini(image):
     prompt = """
-    Analyze this GCASH survey form image. This form has 24 multiple choice questions + 3 handwritten.
+    Look at this GCASH survey form. It has 2 columns: LEFT is "BAGO MAGSIMULA", RIGHT is "SAGUTAN NATIN".
     
-    CRITICAL INSTRUCTION: ONLY return a letter if you SEE a CLEAR CIRCLE around A, B, or C. 
-    If you DO NOT see any circle on a question, you MUST return empty string "" for that question.
-    DO NOT GUESS. DO NOT INVENT. Empty string if no visible circle.
+    Extract answers into JSON with these EXACT keys. Look for CIRCLED letters A, B, or C.
     
-    Extract to JSON with these exact keys:
+    LEFT COLUMN "BAGO MAGSIMULA":
+    PANGALAN: from top left
+    A1_A: "Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?" - which letter A/B/C is circled?
+    A1_B: "Paano mo hinahati ang pera mo kapag may kita ka?" - which letter is circled?
+    A1_C: "Anong ginagawa mo kapag may sobra sa kita mo?" - which letter is circled?
+    B1_A: "Ano ang ginagawa mo sa pera mo?" - which letter is circled?
+    B1_B: "Saan mo nilalagay ang ipon mo?" - which letter is circled?
+    B1_C: "Ano ang gusto mong pag-ipunan?" - which letter is circled?
+    C1_A: "Ano ang naiisip mo kapag sinabing utang?" - which letter is circled?
+    C1_B: "Bakit ka umuutang?" - which letter is circled?
+    C1_C: "Anong ginagawa mo para mabayaran ang utang?" - which letter is circled?
+    D1_A: "Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?" - which letter is circled?
+    D1_B: "Paano mo pinu-protektahan ang password mo?" - which letter is circled?
+    D1_C: "Ano ang pwede mong gawin para makaiwas sa scam?" - which letter is circled?
     
-    PANGALAN: handwritten name at top left
-    MOBILE_NUMBER: from CONTACT NUMBER field at top right
-    NEGOSYO: from NEGOSYO field. If blank, return ""
+    RIGHT COLUMN "SAGUTAN NATIN":
+    MOBILE_NUMBER: from "CONTACT NUMBER" field
+    NEGOSYO: from "NEGOSYO" field, blank = ""
+    A2_A: "Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?" - which letter is circled?
+    A2_B: "Kailan mo sisimulan ang pag-badyet?" - which letter is circled?
+    B2_A: "Ano ang plano mong gawin sa pera mo ngayon?" - which letter is circled?
+    B2_B: "Saan mo gustong ilagay ang ipon mo?" - which letter is circled?
+    B2_C: "Ano ang pinag-iipunan mo ngayon?" - which letter is circled?
+    C2_A: "Ano ang masasabi mo ngayon tungkol sa utang?" - which letter is circled?
+    C2_B: "Paano mo babayaran ang utang mo?" - which letter is circled?
+    C2_C: "Ano ang gagawin mo para umiwas sa mabigat na utang?" - which letter is circled?
+    D2_A: "Ano ang gagawin mo kapag may text tungkol sa investment na kikita ka ng 50% kada buwan?" - which letter is circled?
+    D2_B: "Paano ka mag-iingat sa online shopping?" - which letter is circled?
+    D2_C: "Ano ang gagawin mo kung nabiktima ka ng scam?" - which letter is circled?
+    E1: Handwritten answer
+    E2: Handwritten answer 
+    E3: Handwritten answer
     
-    For each question below, check if A, B, or C has a VISIBLE CIRCLE:
+    RULES:
+    - For A/B/C questions: Return ONLY the letter A or B or C that is circled. If none circled, return ""
+    - If multiple circled in one question, return "A,B"
+    - Return ONLY valid JSON object, not array. No markdown.
     
-    A1_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    A1_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    A1_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    B1_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    B1_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    B1_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    C1_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    C1_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    C1_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    D1_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    D1_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    D1_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    A2_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    A2_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    B2_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    B2_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    B2_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    C2_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    C2_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    C2_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    D2_A: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    D2_B: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    D2_C: Is there a circle around A, B, or C? If yes, which letter? If no circle, return ""
-    E1: Handwritten text. If blank, return ""
-    E2: Handwritten text. If blank, return ""
-    E3: Handwritten text. If blank, return ""
-    
-    FINAL RULE: If you are not 100% sure you see a circle, return "". Never guess.
-    
-    Return ONLY valid JSON object. No markdown, no explanation.
-    
-    Example: {"PANGALAN": "LINDA MANZANO DE OCAMPO", "MOBILE_NUMBER": "09468566342", "NEGOSYO": "", "A1_A": "A", "A1_B": "", "A1_C": "B"}
+    Example: {"PANGALAN": "LINDA MANZANO DE OCAMPO", "MOBILE_NUMBER": "09468566342", "NEGOSYO": "", "A1_A": "A", "A1_B": "B", "A1_C": "B"}
     """
     try:
         response = safe_generate_content("gemini-2.5-flash", image, prompt)
@@ -129,8 +126,8 @@ def extract_survey_gemini(image):
     return json.loads(json_text), response.text
 
 # Initialize session state
-if 'df' not in st.session_state:
-    st.session_state.df = None
+if 'all_data' not in st.session_state:
+    st.session_state.all_data = []
 if 'raw_output' not in st.session_state:
     st.session_state.raw_output = ""
 
@@ -141,22 +138,15 @@ if uploaded_file:
     st.image(image, caption="Ready to scan", use_column_width=True)
     
     if st.button("🔍 Run AI Scan", type="primary"):
-        with st.spinner('Reading encircled answers... DO NOT GUESS mode'):
+        with st.spinner('Gemini AI is reading encircled answers...'):
             try:
                 table_data, raw_text = extract_survey_gemini(image)
                 st.session_state.raw_output = raw_text
                 
                 if table_data:
-                    df = pd.DataFrame([table_data])
-                    
-                    # Ensure all columns exist
-                    for header in HEADERS:
-                        if header not in df.columns:
-                            df[header] = ""
-                    
-                    df = df[HEADERS]
-                    st.session_state.df = df
-                    st.success("✅ Scan complete! Blank = walang bilog na nakita")
+                    # BINALIK SA VERTICAL - 1 column per field
+                    st.session_state.all_data.append(table_data)
+                    st.success("✅ Extracted encircled answers!")
                 else:
                     st.warning("Walang na-detect na data.")
                     
@@ -165,29 +155,39 @@ if uploaded_file:
                 if st.session_state.raw_output:
                     st.code(st.session_state.raw_output)
 
-# Show raw output para ma-verify
+# Show raw output para ma-debug
 if st.session_state.raw_output:
-    with st.expander("🔍 RAW GEMINI OUTPUT - Check mo kung tama"):
-        st.code(st.session_state.raw_output, language="json")
+    with st.expander("🔍 RAW OUTPUT FROM GEMINI - Click to see"):
+        st.code(st.session_state.raw_output, language="text")
 
-# Show editor
-if st.session_state.df is not None:
-    st.subheader("📋 Verify Data - Edit mo kung may mali")
-    st.caption("⚠️ Blank = Walang bilog na nakita si AI. Wag mag-assume.")
+# Show editor - VERTICAL ulit
+if st.session_state.all_data:
+    st.subheader(f"📋 All Scanned Data - {len(st.session_state.all_data)} forms")
+    st.caption("Encircles + Name + Mobile + Negosyo lang ang kukunin")
+    
+    # Convert to DataFrame - VERTICAL
+    df = pd.DataFrame(st.session_state.all_data)
+    
+    # Ensure all columns exist
+    for header in HEADERS:
+        if header not in df.columns:
+            df[header] = ""
+    
+    df = df[HEADERS]
     
     edited_df = st.data_editor(
-        st.session_state.df,
+        df,
         num_rows="dynamic",
         use_container_width=True,
         key="editor",
-        height=500
+        height=600
     )
-    st.session_state.df = edited_df
+    st.session_state.all_data = edited_df.to_dict('records')
     
     col1, col2 = st.columns(2)
     
     with col1:
-        csv = st.session_state.df.to_csv(index=False).encode('utf-8')
+        csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             "📥 Download CSV",
             csv,
@@ -216,4 +216,4 @@ if st.session_state.df is not None:
                 st.code(f"Error details: {repr(e)}")
 else:
     st.info("👆 Upload a survey form photo to start")
-    st.warning("⚠️ Malinaw dapat ang BILOG. Pag walang bilog, blank ang lalabas.")
+    st.warning("⚠️ Dapat malinaw ang BILOG sa A, B, C para ma-detect")

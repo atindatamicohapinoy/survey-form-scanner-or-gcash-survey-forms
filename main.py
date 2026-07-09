@@ -8,9 +8,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-st.set_page_config(page_title="Survey Form OCR - Gemini AI", layout="wide")
-st.title("📝 Survey Form Scanner - Gemini AI")
-st.caption("Upload multiple forms. Lahat maiipon sa table bago i-sync.")
+st.set_page_config(page_title="GCASH Survey Scanner", layout="wide")
+st.title("📝 GCASH Survey Form Scanner")
+st.caption("Upload multiple forms. Encircles + Name + Mobile lang ang kukunin.")
 
 # Setup Gemini API
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
@@ -19,8 +19,38 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Google Sheets setup
 SHEET_ID = "1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84"
 
+# Headers na tugma sa Row 1 ng Sheet mo
+HEADERS = [
+    'TIMESTAMP', 'FILENAME', 'PANGALAN', 'MOBILE_NUMBER',
+    'A1_A. Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?',
+    'A1_B. Paano mo hinahati ang pera mo kapag may kita ka?',
+    'A1_C. Anong ginagawa mo kapag may sobra sa kita mo?',
+    'B1_A. Ano ang ginagawa mo sa pera mo?',
+    'B1_B. Saan mo nilalagay ang ipon mo?',
+    'B1_C. Ano ang gusto mong pag-ipunan?',
+    'C1_A. Ano ang naiisip mo kapag sinabing utang?',
+    'C1_B. Bakit ka umuutang?',
+    'C1_C. Anong ginagawa mo para mabayaran ang utang?',
+    'D1_A. Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?',
+    'D1_B. Paano mo pinu-protektahan ang password mo?',
+    'D1_C. Ano ang pwede mong gawin para makaiwas sa scam?',
+    'A2_A. Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?',
+    'A2_B. Kailan mo sisimulan ang pag-badyet?',
+    'B2_A. Ano ang plano mong gawin sa pera mo ngayon?',
+    'B2_B. Saan mo gustong ilagay ang ipon mo?',
+    'B2_C. Ano ang pinag-iipunan mo ngayon?',
+    'C2_A. Ano ang masasabi mo ngayon tungkol sa utang?',
+    'C2_B. Paano mo babayaran ang utang mo?',
+    'C2_C. Ano ang gagawin mo para umiwas sa mabigat na utang?',
+    'D2_A. Ano ang gagawin mo kapag may text tungkol sa investment na kikita ka ng 50% kada buwan?',
+    'D2_B. Paano ka mag-iingat sa online shopping?',
+    'D2_C. Ano ang gagawin mo kung nabiktima ka ng scam?',
+    'E1. Ano ang gagawin mong paraan para hindi maghalo ang pera ng pamilya at pera ng negosyo?',
+    'E2. Bago mangutang para sa negosyo, ano ang unang dapat mong isipin para masiguradong kaya mo itong bayaran?',
+    'E3. Ano ang red flag o babala para masabing ang isang transaksyon ay isang scam at paano ito maiiwasan?'
+]
+
 def get_gsheet_client():
-    """Connect to Google Sheets using service account"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -36,21 +66,20 @@ def safe_generate_content(model_name, img, prompt):
 
 def extract_survey_gemini(image):
     prompt = """
-    Extract ONLY the following from this GCASH survey form. Return valid JSON array with 1 object.
+    Extract ONLY the CIRCLED/SELECTED answers from this GCASH survey form. Return valid JSON array with 1 object.
     
     RULES:
-    1. Extract "PANGALAN" from the top left
-    2. Extract "MOBILE_NUMBER" from "CONTACT NUMBER" on top right  
-    3. For all multiple choice questions, return ONLY the letter of the CIRCLED/SELECTED answer. If multiple circled, join with comma. If none circled, return "".
-    4. Ignore questions with no circled answer.
-    5. For Section E "SAGUTAN NATIN" handwritten answers, extract text if written. Use keys E1, E2, E3.
+    1. Extract "PANGALAN" from top left
+    2. Extract "MOBILE_NUMBER" from "CONTACT NUMBER" top right
+    3. For ALL multiple choice: return ONLY the letter A, B, or C of the CIRCLED answer. If multiple circled, join with comma. If none, return "".
+    4. For Section E handwritten: extract the text. Use keys E1, E2, E3.
     
-    Use these exact keys:
-    PANGALAN, MOBILE_NUMBER
-    A1_A, A1_B, A1_C, B1_A, B1_B, B1_C, C1_A, C1_B, C1_C, D1_A, D1_B, D1_C
+    Use these exact keys in JSON:
+    PANGALAN, MOBILE_NUMBER,
+    A1_A, A1_B, A1_C, B1_A, B1_B, B1_C, C1_A, C1_B, C1_C, D1_A, D1_B, D1_C,
     A2_A, A2_B, B2_A, B2_B, B2_C, C2_A, C2_B, C2_C, D2_A, D2_B, D2_C, E1, E2, E3
     
-    Example: [{"PANGALAN": "KRSLYN BALSACAB", "MOBILE_NUMBER": "09468566343", "A1_A": "A", "B1_B": "B"}]
+    Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "MOBILE_NUMBER": "09618869183", "A1_A": "C", "A1_B": "C", "D1_A": "A"}]
     
     Only return JSON, no other text.
     """
@@ -65,7 +94,7 @@ def extract_survey_gemini(image):
     
     return json.loads(json_text)
 
-# Initialize session state - ngayon list of dataframes na
+# Initialize session state
 if 'all_data' not in st.session_state:
     st.session_state.all_data = []
 
@@ -73,7 +102,7 @@ if 'all_data' not in st.session_state:
 uploaded_files = st.file_uploader(
     "Upload Survey Form Photos", 
     type=['png', 'jpg', 'jpeg'], 
-    accept_multiple_files=True,  # ← MULTIPLE FILES NA TO
+    accept_multiple_files=True,
     help="Piliin lahat ng pics na i-scan mo. Pwede mag-add ulit mamaya."
 )
 
@@ -94,7 +123,6 @@ if uploaded_files:
                     table_data = extract_survey_gemini(image)
                     
                     if table_data:
-                        # Add timestamp at filename
                         for row in table_data:
                             row['TIMESTAMP'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             row['FILENAME'] = uploaded_file.name
@@ -123,19 +151,22 @@ if st.session_state.all_data:
     
     df = pd.DataFrame(st.session_state.all_data)
     
-    # Reorder columns para mauna yung important
-    priority_cols = ['TIMESTAMP', 'FILENAME', 'PANGALAN', 'MOBILE_NUMBER']
-    other_cols = [col for col in df.columns if col not in priority_cols]
-    df = df[priority_cols + other_cols]
+    # Ensure all columns exist kahit empty
+    for header in HEADERS:
+        if header not in df.columns:
+            df[header] = ""
+    
+    # Reorder columns para tugma sa Sheet
+    df = df[HEADERS]
     
     edited_df = st.data_editor(
         df,
         num_rows="dynamic",
         use_container_width=True,
-        key="editor"
+        key="editor",
+        height=400
     )
     
-    # Update session state
     st.session_state.all_data = edited_df.to_dict('records')
     
     col1, col2 = st.columns(2)
@@ -157,19 +188,19 @@ if st.session_state.all_data:
                     client = get_gsheet_client()
                     sheet = client.open_by_key(SHEET_ID).sheet1
                     
-                    # Convert to list of lists
-                    df_to_sync = pd.DataFrame(st.session_state.all_data)
+                    # Check kung may headers na
+                    existing = sheet.get_all_values()
+                    if len(existing) == 0:
+                        sheet.append_row(HEADERS)
+                    
+                    # Sync rows
+                    df_to_sync = pd.DataFrame(st.session_state.all_data)[HEADERS]
                     rows = df_to_sync.values.tolist()
-                    
-                    # Add headers kung empty pa yung sheet
-                    if len(sheet.get_all_values()) == 0:
-                        sheet.append_row(df_to_sync.columns.tolist())
-                    
                     sheet.append_rows(rows, value_input_option='USER_ENTERED')
+                    
                     st.success(f"✅ {len(rows)} rows synced sa Google Sheets!")
                     st.balloons()
                     
-                    # Optional: Clear data after sync
                     if st.checkbox("Clear data after successful sync"):
                         st.session_state.all_data = []
                         st.rerun()

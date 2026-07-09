@@ -14,8 +14,8 @@ st.title("📝 Survey Form Scanner - Gemini AI")
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Google Sheets setup
-SHEET_ID = "1vPKJPbIzvq3rTbIPKv4XivNtB941u9J_MH6TEmdcc10"
+# Google Sheets setup - UPDATED SHEET_ID
+SHEET_ID = "1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84"
 
 def get_gsheet_client():
     """Connect to Google Sheets using service account"""

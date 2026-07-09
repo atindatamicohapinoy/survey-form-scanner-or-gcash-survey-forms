@@ -10,7 +10,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="GCASH Survey Scanner", layout="wide")
 st.title("📝 GCASH Survey Form Scanner")
-st.caption("Upload multiple forms. Encircles + Name + Mobile lang ang kukunin.")
+st.caption("Upload multiple forms. Encircles + Name + Mobile + Negosyo lang ang kukunin.")
 
 # Setup Gemini API
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"] if "GEMINI_API_KEY" in st.secrets else os.getenv("GEMINI_API_KEY")
@@ -19,9 +19,10 @@ genai.configure(api_key=GEMINI_API_KEY)
 # Google Sheets setup
 SHEET_ID = "1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84"
 
-# Headers na tugma sa Row 1 ng Sheet mo
+# REORDERED HEADERS - Nilipat CONTACT_NUMBER at NEGOSYO after D1_C
 HEADERS = [
-    'TIMESTAMP', 'FILENAME', 'PANGALAN', 'MOBILE_NUMBER',
+    'TIMESTAMP', 'FILENAME', 'PANGALAN', 
+    # BAGO MAGSIMULA - Page 1
     'A1_A. Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?',
     'A1_B. Paano mo hinahati ang pera mo kapag may kita ka?',
     'A1_C. Anong ginagawa mo kapag may sobra sa kita mo?',
@@ -34,6 +35,9 @@ HEADERS = [
     'D1_A. Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?',
     'D1_B. Paano mo pinu-protektahan ang password mo?',
     'D1_C. Ano ang pwede mong gawin para makaiwas sa scam?',
+    # NILIPAT DITO - CONTACT_NUMBER at NEGOSYO
+    'CONTACT_NUMBER', 'NEGOSYO',
+    # SAGUTAN NATIN - Page 2
     'A2_A. Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?',
     'A2_B. Kailan mo sisimulan ang pag-badyet?',
     'B2_A. Ano ang plano mong gawin sa pera mo ngayon?',
@@ -66,51 +70,53 @@ def safe_generate_content(model_name, img, prompt):
 
 def extract_survey_gemini(image):
     prompt = """
-    You are scanning a GCASH financial literacy survey form. Look at the image carefully.
-
-    CRITICAL: Find answers that are CIRCLED, MARKED, or SELECTED with pen/marker. Ignore unmarked options.
-
-    Extract and return ONLY this JSON structure:
+    You are analyzing a GCASH financial literacy survey form with TWO PAGES side by side.
     
-    {
-      "PANGALAN": "text from Pangalan field",
-      "MOBILE_NUMBER": "text from CONTACT NUMBER field",
-      "A1_A": "A or B or C - whichever letter is CIRCLED",
-      "A1_B": "A or B or C - whichever letter is CIRCLED",
-      "A1_C": "A or B or C - whichever letter is CIRCLED",
-      "B1_A": "A or B or C - whichever letter is CIRCLED",
-      "B1_B": "A or B or C - whichever letter is CIRCLED",
-      "B1_C": "A or B or C - whichever letter is CIRCLED",
-      "C1_A": "A or B or C - whichever letter is CIRCLED",
-      "C1_B": "A or B or C - whichever letter is CIRCLED",
-      "C1_C": "A or B or C - whichever letter is CIRCLED",
-      "D1_A": "A or B or C - whichever letter is CIRCLED",
-      "D1_B": "A or B or C - whichever letter is CIRCLED",
-      "D1_C": "A or B or C - whichever letter is CIRCLED",
-      "A2_A": "A or B or C - whichever letter is CIRCLED",
-      "A2_B": "A or B or C - whichever letter is CIRCLED",
-      "B2_A": "A or B or C - whichever letter is CIRCLED",
-      "B2_B": "A or B or C - whichever letter is CIRCLED",
-      "B2_C": "A or B or C - whichever letter is CIRCLED",
-      "C2_A": "A or B or C - whichever letter is CIRCLED",
-      "C2_B": "A or B or C - whichever letter is CIRCLED",
-      "C2_C": "A or B or C - whichever letter is CIRCLED",
-      "D2_A": "A or B or C - whichever letter is CIRCLED",
-      "D2_B": "A or B or C - whichever letter is CIRCLED",
-      "D2_C": "A or B or C - whichever letter is CIRCLED",
-      "E1": "handwritten text if any, else empty string",
-      "E2": "handwritten text if any, else empty string",
-      "E3": "handwritten text if any, else empty string"
-    }
-
+    CRITICAL: Look for answers that are CIRCLED, CHECKED, or FILLED. Focus on the BLACK CIRCLES around letters A, B, C.
+    
+    Extract ONLY these fields. Return valid JSON array with 1 object.
+    
+    PAGE 1 - LEFT SIDE "BAGO MAGSIMULA":
+    1. PANGALAN - handwritten at top
+    2. A1_A - letter of circled answer for "Anong pakiramdam mo kapag pinag-uusapan ang pera at budget?"
+    3. A1_B - letter of circled answer for "Paano mo hinahati ang pera mo kapag may kita ka?"
+    4. A1_C - letter of circled answer for "Anong ginagawa mo kapag may sobra sa kita mo?"
+    5. B1_A - letter of circled answer for "Ano ang ginagawa mo sa pera mo?"
+    6. B1_B - letter of circled answer for "Saan mo nilalagay ang ipon mo?"
+    7. B1_C - letter of circled answer for "Ano ang gusto mong pag-ipunan?"
+    8. C1_A - letter of circled answer for "Ano ang naiisip mo kapag sinabing utang?"
+    9. C1_B - letter of circled answer for "Bakit ka umuutang?"
+    10. C1_C - letter of circled answer for "Anong ginagawa mo para mabayaran ang utang?"
+    11. D1_A - letter of circled answer for "Ano ang gagawin mo kapag may text na nagsasabing Nanalo ka ng P50,000?"
+    12. D1_B - letter of circled answer for "Paano mo pinu-protektahan ang password mo?"
+    13. D1_C - letter of circled answer for "Ano ang pwede mong gawin para makaiwas sa scam?"
+    
+    PAGE 2 - RIGHT SIDE "SAGUTAN NATIN":
+    14. CONTACT_NUMBER - handwritten at top right
+    15. NEGOSYO - handwritten below contact number, return "" if blank or "NONE"
+    16. A2_A - letter of circled answer for "Anong pakiramdam mo ngayon kapag pinag-uusapan ang pera at budget?"
+    17. A2_B - letter of circled answer for "Kailan mo sisimulan ang pag-badyet?"
+    18. B2_A - letter of circled answer for "Ano ang plano mong gawin sa pera mo ngayon?"
+    19. B2_B - letter of circled answer for "Saan mo gustong ilagay ang ipon mo?"
+    20. B2_C - letter of circled answer for "Ano ang pinag-iipunan mo ngayon?"
+    21. C2_A - letter of circled answer for "Ano ang masasabi mo ngayon tungkol sa utang?"
+    22. C2_B - letter of circled answer for "Paano mo babayaran ang utang mo?"
+    23. C2_C - letter of circled answer for "Ano ang gagawin mo para umiwas sa mabigat na utang?"
+    24. D2_A - letter of circled answer for "Ano ang gagawin mo kapag may text tungkol sa investment na kikita ka ng 50% kada buwan?"
+    25. D2_B - letter of circled answer for "Paano ka mag-iingat sa online shopping?"
+    26. D2_C - letter of circled answer for "Ano ang gagawin mo kung nabiktima ka ng scam?"
+    27. E1 - handwritten answer for "Ano ang gagawin mong paraan para hindi maghalo ang pera ng pamilya at pera ng negosyo?"
+    28. E2 - handwritten answer for "Bago mangutang para sa negosyo, ano ang unang dapat mong isipin para masiguradong kaya mo itong bayaran?"
+    29. E3 - handwritten answer for "Ano ang red flag o babala para masabing ang isang transaksyon ay isang scam at paano ito maiiwasan?"
+    
     RULES:
-    1. ONLY return letters A, B, or C for multiple choice. Look for CIRCLES or marks.
-    2. If no circle found for a question, return empty string ""
-    3. If multiple answers circled in one question, return "A,B" or "A,C" etc
-    4. For E1, E2, E3: extract handwritten answer text
-    5. Return ONLY valid JSON array with 1 object, no markdown, no explanation
+    - For multiple choice: Return ONLY A, B, or C. If multiple circled, join with comma like "A,C". If none circled, return "".
+    - For handwritten: Extract exact text. If blank, return "".
+    - Do NOT guess. Only extract what's clearly marked.
     
-    Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "MOBILE_NUMBER": "09618869183", "A1_A": "C", "A1_B": "C", "D1_A": "A"}]
+    Example: [{"PANGALAN": "EDUARDO B. CABATIC JR.", "CONTACT_NUMBER": "09618869183", "NEGOSYO": "NONE", "A1_A": "C", "A1_B": "C", "D1_A": "A", "A2_A": "C"}]
+    
+    Only return JSON, no other text.
     """
     try:
         response = safe_generate_content("gemini-2.5-flash", image, prompt)
@@ -120,8 +126,6 @@ def extract_survey_gemini(image):
     json_text = response.text.strip()
     if json_text.startswith("```json"):
         json_text = json_text.replace("```json", "").replace("```", "").strip()
-    if json_text.startswith("```"):
-        json_text = json_text.replace("```", "").strip()
     
     return json.loads(json_text)
 
@@ -134,7 +138,7 @@ uploaded_files = st.file_uploader(
     "Upload Survey Form Photos", 
     type=['png', 'jpg', 'jpeg'], 
     accept_multiple_files=True,
-    help="Piliin lahat ng pics na i-scan mo"
+    help="Piliin lahat ng pics na i-scan mo. Pwede mag-add ulit mamaya."
 )
 
 if uploaded_files:
@@ -165,7 +169,6 @@ if uploaded_files:
                         
                 except Exception as e:
                     st.error(f"❌ {uploaded_file.name} - Error: {str(e)}")
-                    st.code(str(e))
                 
                 progress_bar.progress((idx + 1) / len(uploaded_files))
             
@@ -183,11 +186,12 @@ if st.session_state.all_data:
     
     df = pd.DataFrame(st.session_state.all_data)
     
-    # Ensure all columns exist
+    # Ensure all columns exist kahit empty
     for header in HEADERS:
         if header not in df.columns:
             df[header] = ""
     
+    # Reorder columns para tugma sa Sheet
     df = df[HEADERS]
     
     edited_df = st.data_editor(
@@ -219,10 +223,12 @@ if st.session_state.all_data:
                     client = get_gsheet_client()
                     sheet = client.open_by_key(SHEET_ID).sheet1
                     
+                    # Check kung may headers na
                     existing = sheet.get_all_values()
                     if len(existing) == 0:
                         sheet.append_row(HEADERS)
                     
+                    # Sync rows
                     df_to_sync = pd.DataFrame(st.session_state.all_data)[HEADERS]
                     rows = df_to_sync.values.tolist()
                     sheet.append_rows(rows, value_input_option='USER_ENTERED')
@@ -239,4 +245,4 @@ if st.session_state.all_data:
                 st.code(f"Error details: {repr(e)}")
 else:
     st.info("👆 Upload multiple survey form photos to start")
-    st.warning("⚠️ Encircles + Name + Mobile lang ang kukunin")
+    st.warning("⚠️ Encircles + Name + Mobile + Negosyo lang ang kukunin")

@@ -1,8 +1,8 @@
-streamlit
-google-generativeai
-gspread
-google-auth
-pandas
-Pillow
-PyMuPDF
-google-api-python-client
+    streamlit
+    google-generativeai
+    gspread
+    google-auth
+    pandas
+    pillow
+    PyMuPDF
+    google-api-python-client

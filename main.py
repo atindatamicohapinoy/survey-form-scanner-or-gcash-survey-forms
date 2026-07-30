@@ -2,115 +2,134 @@ import streamlit as st
 import google.generativeai as genai
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-import json, io, re
+import json
 import pandas as pd
 from PIL import Image
-import fitz
 
+# Page Configuration
 st.set_page_config(page_title="GCash Survey", page_icon="📊", layout="wide")
 
+st.title("GCash Survey")
+st.write("Upload a survey photo to automatically append a single structured row matching your Google Sheet layout.")
+
+# --- UPDATED: Changed to your requested link ---
+# Link: https://docs.google.com/spreadsheets/d/1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84/edit?gid=0#gid=0
 SPREADSHEET_ID = "1E6S7Bh4R-3LC4XYhIsTqS_9sIxN4WGfDtFXwihlVk84"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 
+# Authenticate with Google Sheets & Gemini securely using Streamlit Secrets
 @st.cache_resource
-def init_all():
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    creds_dict = dict(st.secrets["gsheets_credentials"])
-    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key(SPREADSHEET_ID).get_worksheet(0)
-    drive_service = build('drive', 'v3', credentials=creds)
-    return sheet, drive_service
+def init_connections():
+    try:
+        # 1. Setup Gemini API
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-sheet, drive_service = init_all()
+        # 2. Extract the complete credentials dictionary
+        credentials_dict = dict(st.secrets["gsheets_credentials"])
 
-st.title("GCash Survey")
+        # Repair escaped newline strings inside the private key
+        credentials_dict["private_key"] = credentials_dict["private_key"].replace(r"\n", "\n")
 
-# --- YAN NA YUNG GUSTO MO ---
-st.markdown("### GOOGLE DRIVE LINK HERE:")
-st.write("Paste mo dito yung GDrive folder link kung saan mo gusto i-extract.")
-st.success(f"Connected to Sheet: {SHEET_URL}")
+        # Authenticate Scopes
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
 
-def extract_id(link):
-    m = re.search(r'/folders/([a-zA-Z0-9-_]+)', link)
-    if m: return m.group(1), "folder"
-    m = re.search(r'/file/d/([a-zA-Z0-9-_]+)', link)
-    if m: return m.group(1), "file"
-    m = re.search(r'id=([a-zA-Z0-9-_]+)', link)
-    if m: return m.group(1), "folder"
-    if len(link.strip()) > 20 and "/" not in link:
-        return link.strip(), "folder"
-    return None, None
+        # Open Google Sheet - gid=0 means first worksheet/tab
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SPREADSHEET_ID).get_worksheet(0)
+        return sheet
+    except Exception as e:
+        st.error(f"Configuration/Secrets Error: {e}")
+        st.info(f"Make sure you shared the sheet {SHEET_URL} with your service account email as Editor.")
+        st.stop()
 
-def pdf_to_images(pdf_bytes):
-    images = []
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    for page in doc:
-        pix = page.get_pixmap(dpi=200)
-        # FIXED: tanggal sobrang )
-        images.append(Image.open(io.BytesIO(pix.tobytes("png"))))
-    doc.close()
-    return images
+# Initialize sheet connection
+sheet = init_connections()
 
-drive_link = st.text_input(
-    "Drive Link:",
-    placeholder="https://drive.google.com/drive/folders/1It3yDQk90kowL...",
-    label_visibility="collapsed"
-)
+st.success(f"Connected to: [{SPREADSHEET_ID}]({SHEET_URL}) - Tab: {sheet.title} (gid=0)")
 
-if drive_link:
-    fid, ftype = extract_id(drive_link)
-    if not fid:
-        st.error("Mali yung link. Dapat Google Drive link.")
-    else:
-        if st.button("🚀 I-EXTRACT NA FROM DRIVE LINK", type="primary"):
-            all_pages = []
+uploaded_file = st.file_uploader("Choose a survey form image...", type=["jpg", "jpeg", "png"])
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Uploaded Survey Form", use_container_width=True)
+
+    if st.button("🚀 Scan & Sync to New Sheet", type="primary"):
+        with st.spinner("AI is parsing the layout into a horizontal row..."):
             try:
-                if ftype == "folder":
-                    q = f"'{fid}' in parents and trashed=false"
-                    res = drive_service.files().list(q=q, fields="files(id, name, mimeType)", orderBy="name").execute()
-                    files = res.get('files', [])
-                    if not files:
-                        st.error("Walang file sa folder o hindi naka-share sa service account.")
-                        st.stop()
-                    st.info(f"Nakita sa folder: {len(files)} files - Paired as 1+2 = 1 Row (kahit more or less pages ok)")
-                    for f in files:
-                        data = drive_service.files().get_media(fileId=f['id']).execute()
-                        if f['name'].lower().endswith('.pdf'):
-                            all_pages.extend(pdf_to_images(data))
-                        else:
-                            all_pages.append(Image.open(io.BytesIO(data)))
-                else:
-                    data = drive_service.files().get_media(fileId=fid).execute()
-                    all_pages.extend(pdf_to_images(data))
-
-                st.write(f"Total pages to process: {len(all_pages)}")
-
                 model = genai.GenerativeModel('gemini-2.5-flash')
-                prompt = """You have 2 images = 1 person. Image1=Page1 SA WALA PA MAGSUGOD, Image2=Page2 TUBAGON NATO. Name from Ngalan top Image1. Extract ONLY encircled letter A,B,C. For E extract handwritten. Return STRICT JSON only: {"NAME":"","PAGE_1_A_BUDGET_1":"","PAGE_1_A_BUDGET_2":"","PAGE_1_A_BUDGET_3":"","PAGE_1_B_SAVINGS_1":"","PAGE_1_B_SAVINGS_2":"","PAGE_1_B_SAVINGS_3":"","PAGE_1_C_UTANG_1":"","PAGE_1_C_UTANG_2":"","PAGE_1_C_UTANG_3":"","PAGE_1_D_SCAM_1":"","PAGE_1_D_SCAM_2":"","PAGE_1_D_SCAM_3":"","PAGE_2_A_BUDGET_1":"","PAGE_2_A_BUDGET_2":"","PAGE_2_B_SAVINGS_1":"","PAGE_2_B_SAVINGS_2":"","PAGE_2_B_SAVINGS_3":"","PAGE_2_C_UTANG_1":"","PAGE_2_C_UTANG_2":"","PAGE_2_C_UTANG_3":"","PAGE_2_D_SCAM_1":"","PAGE_2_D_SCAM_2":"","PAGE_2_D_SCAM_3":"","PAGE_2_E_1":"","PAGE_2_E_2":"","PAGE_2_E_3":""}"""
 
-                rows = []
-                prog = st.progress(0)
-                for i in range(0, len(all_pages), 2):
-                    if i+1 >= len(all_pages): break
-                    resp = model.generate_content([prompt, all_pages[i], all_pages[i+1]])
-                    raw = resp.text.strip().replace("```json","").replace("```","").strip()
-                    s,e = raw.find("{"), raw.rfind("}")
-                    if s!=-1 and e!=-1: raw=raw[s:e+1]
-                    data = json.loads(raw)
-                    row = [data.get(k,"") for k in ["NAME","PAGE_1_A_BUDGET_1","PAGE_1_A_BUDGET_2","PAGE_1_A_BUDGET_3","PAGE_1_B_SAVINGS_1","PAGE_1_B_SAVINGS_2","PAGE_1_B_SAVINGS_3","PAGE_1_C_UTANG_1","PAGE_1_C_UTANG_2","PAGE_1_C_UTANG_3","PAGE_1_D_SCAM_1","PAGE_1_D_SCAM_2","PAGE_1_D_SCAM_3","PAGE_2_A_BUDGET_1","PAGE_2_A_BUDGET_2","PAGE_2_B_SAVINGS_1","PAGE_2_B_SAVINGS_2","PAGE_2_B_SAVINGS_3","PAGE_2_C_UTANG_1","PAGE_2_C_UTANG_2","PAGE_2_C_UTANG_3","PAGE_2_D_SCAM_1","PAGE_2_D_SCAM_2","PAGE_2_D_SCAM_3","PAGE_2_E_1","PAGE_2_E_2","PAGE_2_E_3"]]
-                    rows.append(row)
-                    st.write(f"✅ Pair {i//2+1}: {data.get('NAME','')}")
-                    prog.progress((i+2)/len(all_pages))
+                prompt = (
+                    "Analyze the survey image and extract data matching this specific horizontal order. "
+                    "For multiple-choice questions, provide only the selected letter (A, B, or C). "
+                    "For handwritten questions under Section E, extract the short text written.\n\n"
+                    "Return your response strictly as a valid JSON object with the following keys. "
+                    "Do not include markdown tags or ```json wrappers.\n\n"
+                    "{\n"
+                    " \"NAME\": \"Full name from the form\",\n"
+                    " \"PAGE_1_A_BUDGET_1\": \"Selected letter\",\n"
+                    " \"PAGE_1_A_BUDGET_2\": \"Selected letter\",\n"
+                    " \"PAGE_1_A_BUDGET_3\": \"Selected letter\",\n"
+                    " \"PAGE_1_B_SAVINGS_1\": \"Selected letter\",\n"
+                    " \"PAGE_1_B_SAVINGS_2\": \"Selected letter\",\n"
+                    " \"PAGE_1_B_SAVINGS_3\": \"Selected letter\",\n"
+                    " \"PAGE_1_C_UTANG_1\": \"Selected letter\",\n"
+                    " \"PAGE_1_C_UTANG_2\": \"Selected letter\",\n"
+                    " \"PAGE_1_C_UTANG_3\": \"Selected letter\",\n"
+                    " \"PAGE_1_D_SCAM_1\": \"Selected letter\",\n"
+                    " \"PAGE_1_D_SCAM_2\": \"Selected letter\",\n"
+                    " \"PAGE_1_D_SCAM_3\": \"Selected letter\",\n"
+                    " \"PAGE_2_A_BUDGET_1\": \"Selected letter\",\n"
+                    " \"PAGE_2_A_BUDGET_2\": \"Selected letter\",\n"
+                    " \"PAGE_2_B_SAVINGS_1\": \"Selected letter\",\n"
+                    " \"PAGE_2_B_SAVINGS_2\": \"Selected letter\",\n"
+                    " \"PAGE_2_B_SAVINGS_3\": \"Selected letter\",\n"
+                    " \"PAGE_2_C_UTANG_1\": \"Selected letter\",\n"
+                    " \"PAGE_2_C_UTANG_2\": \"Selected letter\",\n"
+                    " \"PAGE_2_C_UTANG_3\": \"Selected letter\",\n"
+                    " \"PAGE_2_D_SCAM_1\": \"Selected letter\",\n"
+                    " \"PAGE_2_D_SCAM_2\": \"Selected letter\",\n"
+                    " \"PAGE_2_D_SCAM_3\": \"Selected letter\",\n"
+                    " \"PAGE_2_E_1\": \"Extracted text answer\",\n"
+                    " \"PAGE_2_E_2\": \"Extracted text answer\",\n"
+                    " \"PAGE_2_E_3\": \"Extracted text answer\"\n"
+                    "}"
+                )
 
-                if rows:
-                    sheet.append_rows(rows, value_input_option='USER_ENTERED')
-                    st.balloons()
-                    st.success(f"TAPOS! {len(rows)} rows na-encode from Drive link.")
-                    st.dataframe(pd.DataFrame(rows))
+                response = model.generate_content([prompt, image])
+
+                # JSON Cleaning
+                raw_text = response.text.strip()
+                if raw_text.startswith("```"):
+                    raw_text = raw_text.split("\n", 1)[1]
+                if raw_text.endswith("```"):
+                    raw_text = raw_text.rsplit("\n", 1)[0]
+                raw_text = raw_text.strip("`").strip()
+
+                data = json.loads(raw_text)
+
+                # Strict 27-column mapping layout order matching your spreadsheet grid
+                row_values = [
+                    data.get("NAME", ""),
+                    data.get("PAGE_1_A_BUDGET_1", ""), data.get("PAGE_1_A_BUDGET_2", ""), data.get("PAGE_1_A_BUDGET_3", ""),
+                    data.get("PAGE_1_B_SAVINGS_1", ""), data.get("PAGE_1_B_SAVINGS_2", ""), data.get("PAGE_1_B_SAVINGS_3", ""),
+                    data.get("PAGE_1_C_UTANG_1", ""), data.get("PAGE_1_C_UTANG_2", ""), data.get("PAGE_1_C_UTANG_3", ""),
+                    data.get("PAGE_1_D_SCAM_1", ""), data.get("PAGE_1_D_SCAM_2", ""), data.get("PAGE_1_D_SCAM_3", ""),
+                    data.get("PAGE_2_A_BUDGET_1", ""), data.get("PAGE_2_A_BUDGET_2", ""),
+                    data.get("PAGE_2_B_SAVINGS_1", ""), data.get("PAGE_2_B_SAVINGS_2", ""), data.get("PAGE_2_B_SAVINGS_3", ""),
+                    data.get("PAGE_2_C_UTANG_1", ""), data.get("PAGE_2_C_UTANG_2", ""), data.get("PAGE_2_C_UTANG_3", ""),
+                    data.get("PAGE_2_D_SCAM_1", ""), data.get("PAGE_2_D_SCAM_2", ""), data.get("PAGE_2_D_SCAM_3", ""),
+                    data.get("PAGE_2_E_1", ""), data.get("PAGE_2_E_2", ""), data.get("PAGE_2_E_3", "")
+                ]
+
+                # Directly append values as a horizontal row
+                sheet.append_row(row_values)
+
+                st.success(f"🎉 Success! Row appended for: {data.get('NAME')} to sheet {SHEET_URL}")
+
+                # Render UI Preview Table
+                preview_df = pd.DataFrame([row_values])
+                st.dataframe(preview_df)
 
             except Exception as e:
-                st.error(f"Error: {e} - Check kung naka-share yung Drive folder sa service account as Viewer")
+                st.error(f"Error parsing or writing row: {e}")
